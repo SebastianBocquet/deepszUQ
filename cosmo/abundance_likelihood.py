@@ -1,29 +1,29 @@
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
 from scipy.interpolate import RectBivariateSpline
+from scipy.ndimage import gaussian_filter1d
 import cosmo
 
 N_MC = 2**13
 
-def lnlike(cosmology, M_lim, z_lim, HMF, catalog, survey_area):
+def lnlike(cosmology, M_lim, z_lim, HMF, catalog, survey_area, lnM_err=0.):
     lnM_min, lnM_max = np.log(M_lim)
     # Multiplicative mass uncertainty (systematic bias)
     M_arr = HMF['M_arr'] * cosmology['mass_bias']
     # Survey area (steradians)
     dNdlnM = HMF['dNdlnM'] * survey_area
+    # Convolve with constant mass error
+    if lnM_err>0.:
+        Nbin = lnM_err/np.log(M_arr[1]/M_arr[0])
+        dNdlnM = gaussian_filter1d(dNdlnM, Nbin, axis=1, mode='constant')
     # Total number above cuts
     dNdlnM_interp = RectBivariateSpline(HMF['z_arr'], np.log(M_arr), dNdlnM)
     N_total = dNdlnM_interp.integral(z_lim[0], z_lim[1], lnM_min, lnM_max)
 
-    # halo_contrib = np.log(dNdlnM_interp(catalog['z'], np.log(catalog['M_true']), grid=False))
-    # idx = (((catalog['z']<z_lim[0])|(catalog['z']>z_lim[1]))|(catalog['M_true']<M_lim[0])|(catalog['M_true']>M_lim[1])).nonzero()
-    # halo_contrib[idx] = 0.
-
     # Halo contributions
     if np.all(catalog['lnM_err']==0.):
         idx = ((catalog['z']>=z_lim[0])&(catalog['z']<=z_lim[1])&(catalog['M']>=M_lim[0])&(catalog['M']<=M_lim[1])).nonzero()[0]
-        halo_contrib = np.log(np.array([dNdlnM_interp(catalog['z'][i], np.log(catalog['M'][i]))
-                                        for i in idx]))
+        halo_contrib = np.log(dNdlnM_interp(catalog['z'][idx], np.log(catalog['M'][idx]), grid=False))
         lnlike = np.sum(halo_contrib) - N_total
     # Monte-Carlo approach
     else:
